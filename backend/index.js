@@ -3,6 +3,7 @@ const cors = require('cors');
 require('dotenv').config();
 
 const connectDB = require('./config/db');
+const habitRoutes = require('./routes/habitRoutes');
 
 const app = express();
 
@@ -14,6 +15,9 @@ app.use(express.json());
 app.get('/', (req, res) => {
     res.send('Ticked Backend Server is Running!');
 });
+
+// Habit API Routes
+app.use('/api/habits', habitRoutes);
 
 // Server
 const PORT = process.env.PORT || 5000;
