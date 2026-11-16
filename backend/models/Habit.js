@@ -28,6 +28,11 @@ const habitSchema = new mongoose.Schema({
         max: 7
     },
 
+    position: {
+        type: Number,
+        default: 0
+    },
+
     createdAt: {
         type: Date,
         default: Date.now

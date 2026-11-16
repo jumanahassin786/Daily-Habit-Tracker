@@ -5,11 +5,15 @@ const {
     createHabit,
     getHabits,
     updateHabit,
-    deleteHabit
+    deleteHabit,
+    reorderHabits
 } = require('../controllers/habitController');
 
 // Create a new habit
 router.post('/', createHabit);
+
+// Reorder habits
+router.post('/reorder', reorderHabits);
 
 // Get all habits
 router.get('/', getHabits);
@@ -17,7 +21,7 @@ router.get('/', getHabits);
 // Update an existing habit
 router.put('/:id', updateHabit);
 
-// Delete a habit
+// Delete an existing habit
 router.delete('/:id', deleteHabit);
 
 module.exports = router;
