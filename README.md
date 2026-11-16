@@ -21,7 +21,7 @@ To be updated based on the actual implementation.
 
 Live Demo
 
-"View Live Application" (YOUR_PUBLISHED_LINK)
+"View Live Application" (https://ticked-habit-board-qsz3.arcada.app)
 
 Installation
 
