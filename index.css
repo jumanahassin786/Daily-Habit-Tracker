@@ -1,0 +1,85 @@
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,300..800&family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-display: "Bricolage Grotesque", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --color-paper: #f2eee4;
+  --color-cream: #faf7ef;
+  --color-ink: #1c1a17;
+  --color-inksoft: #4a453d;
+  --color-clay: #8a8474;
+  --color-line: #e3dac6;
+  --color-limepop: #d7f542;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #1c1a17;
+  color: #d7f542;
+}
+
+.dot-grid {
+  background-image: radial-gradient(rgba(28, 26, 23, 0.09) 1px, transparent 1px);
+  background-size: 22px 22px;
+}
+
+.nice-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #c9bfa9 transparent;
+}
+.nice-scroll::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+.nice-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+.nice-scroll::-webkit-scrollbar-thumb {
+  background: #c9bfa9;
+  border-radius: 99px;
+  border: 2px solid #faf7ef;
+}
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+.cell-skipped {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    rgba(28, 26, 23, 0.08) 0px,
+    rgba(28, 26, 23, 0.08) 3px,
+    transparent 3px,
+    transparent 7px
+  );
+}
+
+.cell-future {
+  background-image: radial-gradient(rgba(28, 26, 23, 0.16) 1px, transparent 1.4px);
+  background-size: 8px 8px;
+}
+
+input[type='text']:focus,
+input[type='search']:focus {
+  outline: none;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
