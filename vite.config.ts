@@ -18,8 +18,17 @@ export default defineConfig(async ({ mode }) => {
   }
 
   return {
-    plugins,
-    envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
-    define: processEnvDefines,
-  };
+  plugins,
+  envPrefix: ['VITE_', 'NEXT_PUBLIC_'],
+  define: processEnvDefines,
+
+  server: {
+    proxy: {
+      '/api': {
+        target: 'http://localhost:5000',
+        changeOrigin: true,
+      },
+    },
+  },
+};
 })

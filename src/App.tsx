@@ -15,6 +15,7 @@ import {
 } from './lib/habits';
 import { HabitGlyph, ICON_KEYS, ICON_LABELS } from './components/HabitIcon';
 import ProgressRing from './components/ProgressRing';
+import { habitAPI, checkAPI } from './lib/api';
 
 const LS_HABITS = 'ticked.habits.v1';
 const LS_CHECKS = 'ticked.checks.v1';
@@ -75,6 +76,7 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
   const boardScrollRef = useRef<HTMLDivElement>(null);
+  const backendSyncStarted = useRef(false);
 
   useEffect(() => {
     try {
@@ -88,6 +90,85 @@ export default function App() {
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2400);
   };
+
+  useEffect(() => {
+  if (backendSyncStarted.current) return;
+  backendSyncStarted.current = true;
+
+  const syncWithBackend = async () => {
+    try {
+      const [backendHabits, backendChecks] = await Promise.all([
+        habitAPI.getAll(),
+        checkAPI.getAll(),
+      ]);
+
+      // Backend already has data: load it into the frontend.
+      if (backendHabits.length > 0) {
+        const syncedChecks: ChecksMap = {};
+
+        backendChecks.forEach((check) => {
+          syncedChecks[
+            checkKey(String(check.habitId), check.date)
+          ] = check.status;
+        });
+
+        setHabits(backendHabits);
+        setChecks(syncedChecks);
+        return;
+      }
+
+      // Backend is empty: migrate existing frontend habits.
+      const idMap = new Map<string, string>();
+      const migratedHabits: Habit[] = [];
+
+      for (const habit of habits) {
+        const createdHabit = await habitAPI.create({
+          name: habit.name,
+          icon: habit.icon,
+          color: habit.color,
+          note: habit.note,
+          weeklyTarget: habit.weeklyTarget,
+        });
+
+        idMap.set(habit.id, createdHabit.id);
+        migratedHabits.push(createdHabit);
+      }
+
+      // Migrate existing check history using the new MongoDB IDs.
+      const migratedChecks: ChecksMap = {};
+      const checkPromises: Promise<unknown>[] = [];
+
+      Object.entries(checks).forEach(([key, status]) => {
+        const splitIndex = key.lastIndexOf('::');
+
+        if (splitIndex === -1) return;
+
+        const oldHabitId = key.substring(0, splitIndex);
+        const date = key.substring(splitIndex + 2);
+        const newHabitId = idMap.get(oldHabitId);
+
+        if (!newHabitId) return;
+
+        migratedChecks[checkKey(newHabitId, date)] = status;
+
+        checkPromises.push(
+          checkAPI.save(newHabitId, date, status)
+        );
+      });
+
+      await Promise.all(checkPromises);
+
+      setHabits(migratedHabits);
+      setChecks(migratedChecks);
+
+    } catch (error) {
+      console.error('Backend synchronization failed:', error);
+      showToast('Could not sync with server. Please try again.');
+    }
+  };
+
+  void syncWithBackend();
+}, []);
 
   const days = useMemo(() => getMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
   const isCurrentMonth = viewYear === todayDate.getFullYear() && viewMonth === todayDate.getMonth();
@@ -139,57 +220,111 @@ export default function App() {
 
   // ------------------------------ mutations ------------------------------
   const cycleCell = (habitId: string, dateStr: string) => {
-    if (dateStr > todayStr) {
-      showToast('That day has not happened yet');
-      return;
-    }
-    setChecks((prev) => {
-      const k = checkKey(habitId, dateStr);
-      const cur = prev[k];
-      const next = { ...prev };
-      if (!cur) next[k] = 'done';
-      else if (cur === 'done') next[k] = 'skipped';
-      else delete next[k];
-      return next;
-    });
-  };
+  if (dateStr > todayStr) {
+    showToast('That day has not happened yet');
+    return;
+  }
 
-  const setCell = (habitId: string, dateStr: string, v: 'done' | 'skipped' | null) => {
-    if (dateStr > todayStr && v) {
-      showToast('That day has not happened yet');
-      return;
+  const key = checkKey(habitId, dateStr);
+  const currentStatus = checks[key];
+
+  const nextStatus =
+    !currentStatus
+      ? 'done'
+      : currentStatus === 'done'
+        ? 'skipped'
+        : null;
+
+  setChecks((prev) => {
+    const next = { ...prev };
+
+    if (nextStatus) {
+      next[key] = nextStatus;
+    } else {
+      delete next[key];
     }
-    setChecks((prev) => {
-      const k = checkKey(habitId, dateStr);
-      const next = { ...prev };
-      if (v) next[k] = v;
-      else delete next[k];
-      return next;
-    });
-  };
+
+    return next;
+  });
+
+  const request = nextStatus
+    ? checkAPI.save(habitId, dateStr, nextStatus)
+    : checkAPI.delete(habitId, dateStr);
+
+  void request.catch((error) => {
+    console.error('Failed to save check:', error);
+    showToast('Could not save check to server');
+  });
+};
+
+  const setCell = (
+  habitId: string,
+  dateStr: string,
+  v: 'done' | 'skipped' | null
+) => {
+  if (dateStr > todayStr && v) {
+    showToast('That day has not happened yet');
+    return;
+  }
+
+  const key = checkKey(habitId, dateStr);
+
+  setChecks((prev) => {
+    const next = { ...prev };
+
+    if (v) next[key] = v;
+    else delete next[key];
+
+    return next;
+  });
+
+  const request = v
+    ? checkAPI.save(habitId, dateStr, v)
+    : checkAPI.delete(habitId, dateStr);
+
+  void request.catch((error) => {
+    console.error('Failed to update check:', error);
+    showToast('Could not save check to server');
+  });
+};
 
   const toggleDone = (habitId: string, dateStr: string) => {
     const cur = checks[checkKey(habitId, dateStr)];
     setCell(habitId, dateStr, cur === 'done' ? null : 'done');
   };
 
-  const markAllDone = (dateStr: string) => {
-    if (dateStr > todayStr) return;
-    setChecks((prev) => {
-      const next = { ...prev };
-      for (const h of habits) next[checkKey(h.id, dateStr)] = 'done';
-      return next;
-    });
-    showToast(`All habits ticked for ${prettyLong(dateStr)}`);
-  };
+ const markAllDone = (dateStr: string) => {
+  if (dateStr > todayStr) return;
+
+  setChecks((prev) => {
+    const next = { ...prev };
+    for (const h of habits) next[checkKey(h.id, dateStr)] = 'done';
+    return next;
+  });
+
+  void checkAPI.markAllDone(
+    habits.map((h) => h.id),
+    dateStr
+  ).catch((error) => {
+    console.error('Failed to mark all habits done:', error);
+    showToast('Could not save changes to server');
+  });
+
+  showToast(`All habits ticked for ${prettyLong(dateStr)}`);
+};
 
   const clearDay = (dateStr: string) => {
-    setChecks((prev) => {
-      const next = { ...prev };
-      for (const h of habits) delete next[checkKey(h.id, dateStr)];
-      return next;
-    });
-  };
+  setChecks((prev) => {
+    const next = { ...prev };
+    for (const h of habits) delete next[checkKey(h.id, dateStr)];
+    return next;
+  });
+
+  void checkAPI.clearDay(dateStr).catch((error) => {
+    console.error('Failed to clear day:', error);
+    showToast('Could not clear checks on server');
+  });
+};
 
   const navMonth = (delta: number) => {
     let y = viewYear;
@@ -215,43 +350,85 @@ export default function App() {
     setModalOpen(true);
   };
 
-  const saveHabit = (data: { name: string; note: string; icon: string; color: string; weeklyTarget: number }, id?: string) => {
+  const saveHabit = async (
+  data: {
+    name: string;
+    note: string;
+    icon: string;
+    color: string;
+    weeklyTarget: number;
+  },
+  id?: string
+) => {
+  try {
     if (id) {
-      setHabits((prev) => prev.map((h) => (h.id === id ? { ...h, ...data } : h)));
+      const updatedHabit = await habitAPI.update(id, data);
+
+      setHabits((prev) =>
+        prev.map((h) => (h.id === id ? updatedHabit : h))
+      );
+
       showToast('Habit updated');
     } else {
-      const h: Habit = { id: uid(), createdAt: new Date().toISOString(), ...data };
-      setHabits((prev) => [...prev, h]);
+      const newHabit = await habitAPI.create(data);
+
+      setHabits((prev) => [...prev, newHabit]);
+
       showToast(`“${data.name}” added to the board`);
     }
-    setModalOpen(false);
-  };
 
-  const deleteHabit = (id: string) => {
-    const h = habits.find((x) => x.id === id);
-    if (!h) return;
-    if (!window.confirm(`Delete “${h.name}” and all its ticks?`)) return;
+    setModalOpen(false);
+  } catch (error) {
+    console.error('Failed to save habit:', error);
+    showToast('Could not save habit. Please try again.');
+  }
+};
+
+  const deleteHabit = async (id: string) => {
+  const h = habits.find((x) => x.id === id);
+  if (!h) return;
+
+  if (!window.confirm(`Delete “${h.name}” and all its ticks?`)) return;
+
+  try {
+    await habitAPI.delete(id);
+
     setHabits((prev) => prev.filter((x) => x.id !== id));
+
     setChecks((prev) => {
       const next = { ...prev };
-      for (const k of Object.keys(next)) if (k.startsWith(`${id}::`)) delete next[k];
+      for (const k of Object.keys(next)) {
+        if (k.startsWith(`${id}::`)) delete next[k];
+      }
       return next;
     });
+
     if (selectedHabitId === id) setSelectedHabitId(null);
     setModalOpen(false);
     showToast('Habit deleted');
-  };
+  } catch (error) {
+    console.error('Failed to delete habit:', error);
+    showToast('Could not delete habit. Please try again.');
+  }
+};
 
-  const moveHabit = (id: string, dir: -1 | 1) => {
-    setHabits((prev) => {
-      const i = prev.findIndex((h) => h.id === id);
-      const j = i + dir;
-      if (i < 0 || j < 0 || j >= prev.length) return prev;
-      const next = [...prev];
-      [next[i], next[j]] = [next[j], next[i]];
-      return next;
-    });
-  };
+ const moveHabit = async (id: string, dir: -1 | 1) => {
+  const i = habits.findIndex((h) => h.id === id);
+  const j = i + dir;
+
+  if (i < 0 || j < 0 || j >= habits.length) return;
+
+  const next = [...habits];
+  [next[i], next[j]] = [next[j], next[i]];
+
+  try {
+    await habitAPI.reorder(next.map((h) => h.id));
+    setHabits(next);
+  } catch (error) {
+    console.error('Failed to reorder habits:', error);
+    showToast('Could not update habit order');
+  }
+};
 
   const exportCSV = () => {
     const rows = ['habit,date,status'];

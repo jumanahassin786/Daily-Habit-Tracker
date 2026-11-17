@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const Habit = require('../models/Habit');
+const Check = require('../models/Check');
 
 // CREATE HABIT
 const createHabit = async(req, res) => {
@@ -129,9 +130,12 @@ const deleteHabit = async(req, res) => {
             });
         }
 
+        // Delete all checks associated with this habit
+        await Check.deleteMany({ habitId: habit._id });
+
         res.status(200).json({
             success: true,
-            message: 'Habit deleted successfully'
+            message: 'Habit and associated checks deleted successfully'
         });
 
     } catch (error) {
@@ -141,7 +145,6 @@ const deleteHabit = async(req, res) => {
         });
     }
 };
-
 
 // REORDER HABITS
 const reorderHabits = async(req, res) => {
