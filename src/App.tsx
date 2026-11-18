@@ -444,7 +444,7 @@ export default function App() {
           </div>
         </section>
 
-        {/* 02 — weekly analysis */}
+                {/* 02 — weekly analysis */}
         <section aria-label="Weekly analysis" className="mt-10">
           <SectionHead
             index="02"
@@ -474,13 +474,49 @@ export default function App() {
           </div>
         </section>
 
+        {/* 03 — monthly analytics */}
+        <section aria-label="Monthly analytics" className="mt-10">
+          <SectionHead
+            index="03"
+            title="Monthly analytics"
+            desc="Understand your monthly consistency, daily progress and habit performance."
+          />
+          <div className="mt-4">
+            <MonthlyAnalytics
+              habits={habits}
+              checks={checks}
+              year={viewYear}
+              month={viewMonth}
+              todayStr={todayStr}
+            />
+          </div>
+        </section>
+
+        {/* Footer */}
         <footer className="mt-8 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white px-5 py-4">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12px] text-ink/60">
-            <LegendDot className="bg-ink text-white" label="Done — click a box to tick" icon={<Check size={11} strokeWidth={3.5} />} />
-            <LegendDot className="cell-skipped border-ink/25 text-ink/60" label="Skipped — click again" icon={<Minus size={12} strokeWidth={3} />} />
-            <LegendDot className="bg-white text-ink/30" label="Open — right-click clears" icon={<Plus size={11} strokeWidth={3} />} />
-            <LegendDot className="cell-future text-ink/25" label="Future day" icon={<CircleDashed size={12} />} />
+            <LegendDot
+              className="bg-ink text-white"
+              label="Done — click a box to tick"
+              icon={<Check size={11} strokeWidth={3.5} />}
+            />
+            <LegendDot
+              className="cell-skipped border-ink/25 text-ink/60"
+              label="Skipped — click again"
+              icon={<Minus size={12} strokeWidth={3} />}
+            />
+            <LegendDot
+              className="bg-white text-ink/30"
+              label="Open — right-click clears"
+              icon={<Plus size={11} strokeWidth={3} />}
+            />
+            <LegendDot
+              className="cell-future text-ink/25"
+              label="Future day"
+              icon={<CircleDashed size={12} />}
+            />
           </div>
+
           <div className="flex items-center gap-2">
             <button
               onClick={exportCSV}
@@ -490,10 +526,12 @@ export default function App() {
             </button>
           </div>
         </footer>
+
         <p className="mt-3 text-center text-[12px] text-ink/35">
           Your habits and progress are securely saved to your account.
         </p>
-      </main>
+        </main>
+
 
       {/* habit drawer */}
       <AnimatePresence>
@@ -1449,7 +1487,295 @@ function WeeklyAnalysis(props: {
     </div>
   );
 }
+/* -------------------------- MonthlyAnalytics (section 03) -------------------------- */
 
+function MonthlyAnalytics(props: {
+  habits: Habit[];
+  checks: ChecksMap;
+  year: number;
+  month: number;
+  todayStr: string;
+}) {
+  const { habits, checks, year, month, todayStr } = props;
+
+  const days = useMemo(() => {
+    return getMonthDays(year, month).filter(
+      (d) => toDateStr(d) <= todayStr
+    );
+  }, [year, month, todayStr]);
+
+  const previousMonth = useMemo(() => {
+    const date = new Date(year, month - 1, 1);
+    const previousDays = getMonthDays(
+      date.getFullYear(),
+      date.getMonth()
+    ).filter((d) => toDateStr(d) <= todayStr);
+
+    let done = 0;
+    let total = 0;
+
+    for (const day of previousDays) {
+      const ds = toDateStr(day);
+
+      for (const habit of habits) {
+        const status = checks[checkKey(habit.id, ds)];
+
+        if (status === 'skipped') continue;
+
+        total++;
+        if (status === 'done') done++;
+      }
+    }
+
+    return total > 0 ? Math.round((done / total) * 100) : 0;
+  }, [year, month, habits, checks, todayStr]);
+
+  const analytics = useMemo(() => {
+    let done = 0;
+    let skipped = 0;
+    let total = 0;
+    let perfectDays = 0;
+
+    const daily = days.map((day) => {
+      const ds = toDateStr(day);
+      let dayDone = 0;
+      let daySkipped = 0;
+
+      for (const habit of habits) {
+        const status = checks[checkKey(habit.id, ds)];
+
+        if (status === 'done') dayDone++;
+        if (status === 'skipped') daySkipped++;
+      }
+
+      const eligible = habits.length - daySkipped;
+      const pct = eligible > 0
+        ? Math.round((dayDone / eligible) * 100)
+        : 0;
+
+      done += dayDone;
+      skipped += daySkipped;
+      total += eligible;
+
+      if (habits.length > 0 && dayDone === habits.length) {
+        perfectDays++;
+      }
+
+      return { date: ds, day: day.getDate(), done: dayDone, pct };
+    });
+
+    const habitPerformance = habits.map((habit) => {
+      let habitDone = 0;
+      let habitSkipped = 0;
+      let habitTotal = 0;
+
+      for (const day of days) {
+        const status = checks[checkKey(habit.id, toDateStr(day))];
+
+        if (status === 'skipped') {
+          habitSkipped++;
+          continue;
+        }
+
+        habitTotal++;
+        if (status === 'done') habitDone++;
+      }
+
+      return {
+        habit,
+        done: habitDone,
+        skipped: habitSkipped,
+        pct: habitTotal > 0
+          ? Math.round((habitDone / habitTotal) * 100)
+          : 0,
+      };
+    }).sort((a, b) => b.pct - a.pct);
+
+    return {
+      done,
+      skipped,
+      total,
+      pct: total > 0 ? Math.round((done / total) * 100) : 0,
+      perfectDays,
+      daily,
+      habitPerformance,
+    };
+  }, [days, habits, checks]);
+
+  const difference = analytics.pct - previousMonth;
+
+  return (
+    <div className="space-y-4">
+
+      {/* Monthly summary */}
+      <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+        {[
+          {
+            label: 'Completed',
+            value: analytics.done,
+            icon: <Check size={16} />,
+          },
+          {
+            label: 'Skipped',
+            value: analytics.skipped,
+            icon: <Minus size={16} />,
+          },
+          {
+            label: 'Completion rate',
+            value: `${analytics.pct}%`,
+            icon: <Target size={16} />,
+          },
+          {
+            label: 'Perfect days',
+            value: analytics.perfectDays,
+            icon: <Trophy size={16} />,
+          },
+        ].map((item, index) => (
+          <motion.div
+            key={item.label}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: index * 0.06 }}
+            className="rounded-2xl border border-neutral-200 bg-white p-4"
+          >
+            <div className="flex items-center gap-2 text-ink/50">
+              {item.icon}
+              <span className="text-[11px] font-medium">{item.label}</span>
+            </div>
+            <p className="mt-3 font-display text-3xl font-semibold tabular">
+              {item.value}
+            </p>
+          </motion.div>
+        ))}
+      </div>
+
+      {/* Daily completion chart */}
+      <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="font-display text-[16px] font-semibold">
+              Daily completion trend
+            </h3>
+            <p className="mt-1 text-[11px] text-ink/45">
+              Your daily habit completion throughout {MONTH_NAMES[month]}
+            </p>
+          </div>
+          <span className="rounded-full bg-neutral-100 px-3 py-1.5 text-[11px] font-semibold">
+            {analytics.pct}% average
+          </span>
+        </div>
+
+        <div className="mt-6 flex h-40 items-end gap-1 overflow-x-auto pb-1">
+          {analytics.daily.map((item) => (
+            <div
+              key={item.date}
+              className="group flex h-full min-w-[9px] flex-1 flex-col items-center justify-end gap-1"
+              title={`${item.date}: ${item.pct}%`}
+            >
+              <span className="text-[9px] text-ink/45 opacity-0 group-hover:opacity-100">
+                {item.pct}%
+              </span>
+              <motion.div
+                initial={{ height: 0 }}
+                animate={{ height: `${item.pct}%` }}
+                transition={{ duration: 0.5, ease: 'easeOut' }}
+                className="w-full min-h-[2px] rounded-t-sm bg-ink/75 group-hover:bg-ink"
+              />
+              <span className="text-[9px] text-ink/40 tabular">
+                {item.day}
+              </span>
+            </div>
+          ))}
+          {analytics.daily.length === 0 && (
+            <p className="w-full py-8 text-center text-[12px] text-ink/45">
+              No days available for this month.
+            </p>
+          )}
+        </div>
+      </section>
+
+      {/* Habit performance */}
+      <section className="rounded-2xl border border-neutral-200 bg-white p-5">
+        <div>
+          <h3 className="font-display text-[16px] font-semibold">
+            Habit performance
+          </h3>
+          <p className="mt-1 text-[11px] text-ink/45">
+            Completion rate for each habit this month
+          </p>
+        </div>
+
+        <div className="mt-4 space-y-4">
+          {analytics.habitPerformance.map((item, index) => (
+            <div key={item.habit.id}>
+              <div className="mb-1.5 flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-neutral-100">
+                    <HabitGlyph k={item.habit.icon} size={15} />
+                  </span>
+                  <span className="truncate text-[12px] font-semibold">
+                    {item.habit.name}
+                  </span>
+                </div>
+                <span className="shrink-0 text-[12px] font-semibold tabular">
+                  {item.pct}%
+                </span>
+              </div>
+
+              <div className="h-2 overflow-hidden rounded-full bg-neutral-100">
+                <motion.div
+                  initial={{ width: 0 }}
+                  animate={{ width: `${item.pct}%` }}
+                  transition={{ duration: 0.7, delay: index * 0.04 }}
+                  className="h-full rounded-full bg-ink"
+                />
+              </div>
+              <p className="mt-1 text-[10px] text-ink/40">
+                {item.done} completed · {item.skipped} skipped
+              </p>
+            </div>
+          ))}
+
+          {analytics.habitPerformance.length === 0 && (
+            <p className="py-5 text-center text-[12px] text-ink/45">
+              Add habits to see your performance.
+            </p>
+          )}
+        </div>
+      </section>
+
+      {/* Monthly comparison */}
+      <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white p-5">
+        <div>
+          <p className="text-[11px] font-medium text-ink/45">
+            MONTH-OVER-MONTH COMPARISON
+          </p>
+          <h3 className="mt-1 font-display text-[17px] font-semibold">
+            {difference > 0
+              ? 'Your consistency is improving!'
+              : difference < 0
+                ? 'There is room to improve.'
+                : 'Keep building your consistency.'}
+          </h3>
+          <p className="mt-1 text-[12px] text-ink/45">
+            Compared with the previous month
+          </p>
+        </div>
+
+        <div className={`text-3xl font-semibold tabular ${
+          difference > 0
+            ? 'text-green-700'
+            : difference < 0
+              ? 'text-red-600'
+              : 'text-ink/50'
+        }`}>
+          {difference > 0 ? '+' : ''}{difference}%
+        </div>
+      </section>
+
+    </div>
+  );
+}
 /* ------------------------------- Celebration ------------------------------ */
 
 function Celebrate() {
