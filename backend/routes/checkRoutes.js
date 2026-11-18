@@ -9,6 +9,11 @@ const {
     markAllDone
 } = require('../controllers/checkController');
 
+const protect = require('../middleware/authMiddleware');
+
+// All check routes require authentication
+router.use(protect);
+
 // Save or update a check
 router.post('/', saveCheck);
 

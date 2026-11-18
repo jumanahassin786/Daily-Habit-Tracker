@@ -3,66 +3,28 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   ArrowDown, ArrowLeftRight, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight,
   CircleDashed, Download, Flame, LayoutGrid, Minus, PartyPopper, PenLine, Plus,
-  Quote, RotateCcw, Rows3, Search, Sparkles, Target, Trash2, Trophy, X, Zap,
-  Columns3,
+  Quote, Rows3, Search, Sparkles, Target, Trash2, Trophy, X, Zap,
+  Columns3, LogOut,
 } from 'lucide-react';
 import type { BoardMode, ChecksMap, Habit, SortKey } from './types';
 import { checkKey } from './types';
 import {
   MONTH_NAMES, WEEKDAY_LETTER, calcDayPct, calcHabitStats, calcOverall,
   getMonthDays, getTodayStr, greeting, isWeekendDate, parseDateStr,
-  prettyLong, quoteFor, seedChecks, seedHabits, toDateStr, HABIT_COLORS,
+  prettyLong, quoteFor, toDateStr, HABIT_COLORS,
 } from './lib/habits';
 import { HabitGlyph, ICON_KEYS, ICON_LABELS } from './components/HabitIcon';
 import ProgressRing from './components/ProgressRing';
 import { habitAPI, checkAPI } from './lib/api';
-
-const LS_HABITS = 'ticked.habits.v1';
-const LS_CHECKS = 'ticked.checks.v1';
-const LS_SEEDED = 'ticked.seeded.v1';
-
-function loadHabits(): Habit[] | null {
-  try {
-    const raw = localStorage.getItem(LS_HABITS);
-    if (!raw) return null;
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : null;
-  } catch { return null; }
-}
-function loadChecks(): ChecksMap {
-  try {
-    const raw = localStorage.getItem(LS_CHECKS);
-    if (!raw) return {};
-    const o = JSON.parse(raw);
-    return o && typeof o === 'object' ? o : {};
-  } catch { return {}; }
-}
-
-function uid() {
-  return `h-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
-}
+import { useAuth } from './context/AuthContext';
 
 export default function App() {
+  const { user, logout } = useAuth();
   const todayStr = useMemo(() => getTodayStr(), []);
   const todayDate = useMemo(() => parseDateStr(todayStr), [todayStr]);
 
-  const [habits, setHabits] = useState<Habit[]>(() => {
-    const stored = loadHabits();
-    if (stored && stored.length > 0) return stored;
-    return seedHabits();
-  });
-  const [checks, setChecks] = useState<ChecksMap>(() => {
-    const stored = loadChecks();
-    if (Object.keys(stored).length > 0) return stored;
-    try {
-      if (!localStorage.getItem(LS_SEEDED)) {
-        const seeded = seedChecks(seedHabits(), getTodayStr());
-        localStorage.setItem(LS_SEEDED, '1');
-        return seeded;
-      }
-    } catch { /* ignore */ }
-    return {};
-  });
+  const [habits, setHabits] = useState<Habit[]>([]);
+  const [checks, setChecks] = useState<ChecksMap>({});
 
   const [viewYear, setViewYear] = useState(todayDate.getFullYear());
   const [viewMonth, setViewMonth] = useState(todayDate.getMonth());
@@ -76,99 +38,47 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const toastTimer = useRef<number | undefined>(undefined);
   const boardScrollRef = useRef<HTMLDivElement>(null);
-  const backendSyncStarted = useRef(false);
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(LS_HABITS, JSON.stringify(habits));
-      localStorage.setItem(LS_CHECKS, JSON.stringify(checks));
-    } catch { /* ignore */ }
-  }, [habits, checks]);
-
   const showToast = (msg: string) => {
     setToast(msg);
     window.clearTimeout(toastTimer.current);
     toastTimer.current = window.setTimeout(() => setToast(null), 2400);
   };
 
+  // Load only the authenticated user's data from the backend.
+  // Never migrate browser-local demo data into an account.
   useEffect(() => {
-  if (backendSyncStarted.current) return;
-  backendSyncStarted.current = true;
+    let cancelled = false;
 
-  const syncWithBackend = async () => {
-    try {
-      const [backendHabits, backendChecks] = await Promise.all([
-        habitAPI.getAll(),
-        checkAPI.getAll(),
-      ]);
+    const syncWithBackend = async () => {
+      try {
+        const [backendHabits, backendChecks] = await Promise.all([
+          habitAPI.getAll(),
+          checkAPI.getAll(),
+        ]);
 
-      // Backend already has data: load it into the frontend.
-      if (backendHabits.length > 0) {
+        if (cancelled) return;
+
         const syncedChecks: ChecksMap = {};
-
         backendChecks.forEach((check) => {
-          syncedChecks[
-            checkKey(String(check.habitId), check.date)
-          ] = check.status;
+          syncedChecks[checkKey(String(check.habitId), check.date)] = check.status;
         });
 
         setHabits(backendHabits);
         setChecks(syncedChecks);
-        return;
+      } catch (error) {
+        console.error('Backend synchronization failed:', error);
+        if (!cancelled) {
+          showToast('Could not sync with server. Please try again.');
+        }
       }
+    };
 
-      // Backend is empty: migrate existing frontend habits.
-      const idMap = new Map<string, string>();
-      const migratedHabits: Habit[] = [];
+    void syncWithBackend();
 
-      for (const habit of habits) {
-        const createdHabit = await habitAPI.create({
-          name: habit.name,
-          icon: habit.icon,
-          color: habit.color,
-          note: habit.note,
-          weeklyTarget: habit.weeklyTarget,
-        });
-
-        idMap.set(habit.id, createdHabit.id);
-        migratedHabits.push(createdHabit);
-      }
-
-      // Migrate existing check history using the new MongoDB IDs.
-      const migratedChecks: ChecksMap = {};
-      const checkPromises: Promise<unknown>[] = [];
-
-      Object.entries(checks).forEach(([key, status]) => {
-        const splitIndex = key.lastIndexOf('::');
-
-        if (splitIndex === -1) return;
-
-        const oldHabitId = key.substring(0, splitIndex);
-        const date = key.substring(splitIndex + 2);
-        const newHabitId = idMap.get(oldHabitId);
-
-        if (!newHabitId) return;
-
-        migratedChecks[checkKey(newHabitId, date)] = status;
-
-        checkPromises.push(
-          checkAPI.save(newHabitId, date, status)
-        );
-      });
-
-      await Promise.all(checkPromises);
-
-      setHabits(migratedHabits);
-      setChecks(migratedChecks);
-
-    } catch (error) {
-      console.error('Backend synchronization failed:', error);
-      showToast('Could not sync with server. Please try again.');
-    }
-  };
-
-  void syncWithBackend();
-}, []);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const days = useMemo(() => getMonthDays(viewYear, viewMonth), [viewYear, viewMonth]);
   const isCurrentMonth = viewYear === todayDate.getFullYear() && viewMonth === todayDate.getMonth();
@@ -448,15 +358,6 @@ export default function App() {
     showToast('Month exported as CSV');
   };
 
-  const resetDemo = () => {
-    if (!window.confirm('Reset the board to fresh demo data? Your ticks will be replaced.')) return;
-    const fresh = seedHabits();
-    setHabits(fresh);
-    setChecks(seedChecks(fresh, todayStr));
-    try { localStorage.setItem(LS_SEEDED, '1'); } catch { /* ignore */ }
-    showToast('Fresh demo board loaded');
-  };
-
   const quote = quoteFor(focusDate);
 
   return (
@@ -476,6 +377,8 @@ export default function App() {
         search={search}
         setSearch={setSearch}
         onAdd={openAdd}
+        userName={user?.name ?? 'User'}
+        onLogout={logout}
       />
 
       <main className="mx-auto w-full max-w-[1440px] px-4 sm:px-6 pb-16">
@@ -585,16 +488,10 @@ export default function App() {
             >
               <Download size={14} /> Export CSV
             </button>
-            <button
-              onClick={resetDemo}
-              className="inline-flex items-center gap-1.5 rounded-full border border-neutral-200 bg-white px-3.5 py-2 text-[12px] font-semibold hover:border-neutral-400 transition-colors"
-            >
-              <RotateCcw size={14} /> Reset demo
-            </button>
           </div>
         </footer>
         <p className="mt-3 text-center text-[12px] text-ink/35">
-          Your ticks are saved in this browser — no account needed
+          Your habits and progress are securely saved to your account.
         </p>
       </main>
 
@@ -662,6 +559,8 @@ function TopBar(props: {
   search: string;
   setSearch: (s: string) => void;
   onAdd: () => void;
+  userName: string;
+  onLogout: () => void;
 }) {
   return (
     <header className="sticky top-0 z-40 border-b border-neutral-200 bg-white/90 backdrop-blur-md">
@@ -737,6 +636,17 @@ function TopBar(props: {
         >
           <Plus size={16} strokeWidth={3} /> New habit
         </button>
+
+        <div className="flex items-center gap-2 rounded-full border border-neutral-200 bg-white py-1 pl-3 pr-1">
+          <span className="max-w-[110px] truncate text-[12px] font-semibold text-ink/65">{props.userName}</span>
+          <button
+            onClick={props.onLogout}
+            className="inline-flex items-center gap-1.5 rounded-full px-3 py-2 text-[12px] font-semibold text-ink/60 transition hover:bg-neutral-100 hover:text-ink"
+            title="Log out"
+          >
+            <LogOut size={14} /> Logout
+          </button>
+        </div>
       </div>
       {/* mobile search */}
       <div className="md:hidden px-4 pb-3">

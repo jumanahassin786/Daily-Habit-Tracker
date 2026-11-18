@@ -7,12 +7,29 @@ const createHabit = async(req, res) => {
     try {
         const { name, icon, color, note, weeklyTarget } = req.body;
 
-        const lastHabit = await Habit.findOne().sort({ position: -1 });
+        if (
+            typeof name !== 'string' ||
+            !name.trim() ||
+            typeof icon !== 'string' ||
+            typeof color !== 'string'
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: 'Name, icon and color are required'
+            });
+        }
 
-        const nextPosition = lastHabit ? lastHabit.position + 1 : 0;
+        const lastHabit = await Habit.findOne({
+            userId: req.user._id
+        }).sort({ position: -1 });
+
+        const nextPosition = lastHabit ?
+            lastHabit.position + 1 :
+            0;
 
         const habit = await Habit.create({
-            name,
+            userId: req.user._id,
+            name: name.trim(),
             icon,
             color,
             note,
@@ -20,7 +37,7 @@ const createHabit = async(req, res) => {
             position: nextPosition
         });
 
-        res.status(201).json({
+        return res.status(201).json({
             success: true,
             message: 'Habit created successfully',
             habit: {
@@ -36,23 +53,27 @@ const createHabit = async(req, res) => {
         });
 
     } catch (error) {
-        res.status(500).json({
+        console.error('Create habit error:', error);
+
+        return res.status(500).json({
             success: false,
-            message: error.message
+            message: 'Failed to create habit'
         });
     }
 };
 
 
-// GET ALL HABITS
+// GET ALL USER HABITS
 const getHabits = async(req, res) => {
     try {
-        const habits = await Habit.find().sort({
+        const habits = await Habit.find({
+            userId: req.user._id
+        }).sort({
             position: 1,
             createdAt: -1
         });
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             count: habits.length,
             habits: habits.map(habit => ({
@@ -68,9 +89,11 @@ const getHabits = async(req, res) => {
         });
 
     } catch (error) {
-        res.status(500).json({
+        console.error('Get habits error:', error);
+
+        return res.status(500).json({
             success: false,
-            message: error.message
+            message: 'Failed to retrieve habits'
         });
     }
 };
@@ -79,13 +102,57 @@ const getHabits = async(req, res) => {
 // UPDATE HABIT
 const updateHabit = async(req, res) => {
     try {
-        const habit = await Habit.findByIdAndUpdate(
-            req.params.id,
-            req.body, {
-                new: true,
-                runValidators: true
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid habit ID'
+            });
+        }
+
+        const allowedFields = [
+            'name',
+            'icon',
+            'color',
+            'note',
+            'weeklyTarget'
+        ];
+
+        const updates = {};
+
+        for (const field of allowedFields) {
+            if (Object.prototype.hasOwnProperty.call(req.body, field)) {
+                updates[field] = req.body[field];
             }
-        );
+        }
+
+        if (Object.keys(updates).length === 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'No valid fields provided'
+            });
+        }
+
+        if (
+            updates.name !== undefined &&
+            (typeof updates.name !== 'string' || !updates.name.trim())
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: 'Habit name cannot be empty'
+            });
+        }
+
+        if (updates.name !== undefined) {
+            updates.name = updates.name.trim();
+        }
+
+        const habit = await Habit.findOneAndUpdate({
+            _id: req.params.id,
+            userId: req.user._id
+        }, { $set: updates }, {
+            new: true,
+            runValidators: true
+        });
 
         if (!habit) {
             return res.status(404).json({
@@ -94,7 +161,7 @@ const updateHabit = async(req, res) => {
             });
         }
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: 'Habit updated successfully',
             habit: {
@@ -110,9 +177,11 @@ const updateHabit = async(req, res) => {
         });
 
     } catch (error) {
-        res.status(500).json({
+        console.error('Update habit error:', error);
+
+        return res.status(500).json({
             success: false,
-            message: error.message
+            message: 'Failed to update habit'
         });
     }
 };
@@ -121,7 +190,17 @@ const updateHabit = async(req, res) => {
 // DELETE HABIT
 const deleteHabit = async(req, res) => {
     try {
-        const habit = await Habit.findByIdAndDelete(req.params.id);
+        if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid habit ID'
+            });
+        }
+
+        const habit = await Habit.findOneAndDelete({
+            _id: req.params.id,
+            userId: req.user._id
+        });
 
         if (!habit) {
             return res.status(404).json({
@@ -130,42 +209,50 @@ const deleteHabit = async(req, res) => {
             });
         }
 
-        // Delete all checks associated with this habit
-        await Check.deleteMany({ habitId: habit._id });
+        await Check.deleteMany({
+            habitId: habit._id
+        });
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: 'Habit and associated checks deleted successfully'
         });
 
     } catch (error) {
-        res.status(500).json({
+        console.error('Delete habit error:', error);
+
+        return res.status(500).json({
             success: false,
-            message: error.message
+            message: 'Failed to delete habit'
         });
     }
 };
 
-// REORDER HABITS
+
+// REORDER USER HABITS
 const reorderHabits = async(req, res) => {
     try {
         const { habitIds } = req.body;
 
-        if (!Array.isArray(habitIds) || habitIds.length === 0) {
+        if (!Array.isArray(habitIds)) {
             return res.status(400).json({
                 success: false,
                 message: 'Please provide a valid habitIds array'
             });
         }
 
-        if (habitIds.some(id => !mongoose.Types.ObjectId.isValid(id))) {
+        if (habitIds.some(
+                id => !mongoose.Types.ObjectId.isValid(id)
+            )) {
             return res.status(400).json({
                 success: false,
                 message: 'One or more habit IDs are invalid'
             });
         }
 
-        const uniqueIds = [...new Set(habitIds.map(id => id.toString()))];
+        const uniqueIds = [
+            ...new Set(habitIds.map(id => id.toString()))
+        ];
 
         if (uniqueIds.length !== habitIds.length) {
             return res.status(400).json({
@@ -175,7 +262,8 @@ const reorderHabits = async(req, res) => {
         }
 
         const habits = await Habit.find({
-            _id: { $in: uniqueIds }
+            _id: { $in: uniqueIds },
+            userId: req.user._id
         });
 
         if (habits.length !== uniqueIds.length) {
@@ -185,29 +273,38 @@ const reorderHabits = async(req, res) => {
             });
         }
 
-        const allHabits = await Habit.countDocuments();
+        const totalHabits = await Habit.countDocuments({
+            userId: req.user._id
+        });
 
-        if (allHabits !== uniqueIds.length) {
+        if (totalHabits !== uniqueIds.length) {
             return res.status(400).json({
                 success: false,
-                message: 'Please provide all habit IDs to reorder'
+                message: 'Please provide all your habit IDs to reorder'
             });
         }
 
         const operations = uniqueIds.map((id, index) => ({
             updateOne: {
-                filter: { _id: id },
-                update: { $set: { position: index } }
+                filter: {
+                    _id: id,
+                    userId: req.user._id
+                },
+                update: {
+                    $set: { position: index }
+                }
             }
         }));
 
-        await Habit.bulkWrite(operations);
+        if (operations.length > 0) {
+            await Habit.bulkWrite(operations);
+        }
 
-        const updatedHabits = await Habit.find().sort({
-            position: 1
-        });
+        const updatedHabits = await Habit.find({
+            userId: req.user._id
+        }).sort({ position: 1 });
 
-        res.status(200).json({
+        return res.status(200).json({
             success: true,
             message: 'Habits reordered successfully',
             habits: updatedHabits.map(habit => ({
@@ -218,9 +315,11 @@ const reorderHabits = async(req, res) => {
         });
 
     } catch (error) {
-        res.status(500).json({
+        console.error('Reorder habits error:', error);
+
+        return res.status(500).json({
             success: false,
-            message: error.message
+            message: 'Failed to reorder habits'
         });
     }
 };

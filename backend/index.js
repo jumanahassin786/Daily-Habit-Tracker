@@ -5,6 +5,7 @@ require('dotenv').config();
 const connectDB = require('./config/db');
 const habitRoutes = require('./routes/habitRoutes');
 const checkRoutes = require('./routes/checkRoutes');
+const authRoutes = require('./routes/authRoutes');
 
 const app = express();
 
@@ -22,12 +23,13 @@ app.get('/', (req, res) => {
 });
 
 // Habit API Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/habits', habitRoutes);
 app.use('/api/checks', checkRoutes);
 console.log('Registered check routes:', checkRoutes.stack.filter(r => r.route).map(r => ({ path: r.route.path, methods: r.route.methods })));
 
-// Server
 const PORT = process.env.PORT || 5000;
+// Server
 
 const startServer = async() => {
     await connectDB();
